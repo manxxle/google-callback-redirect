@@ -1,8 +1,7 @@
-
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Google Callback</title>
+  <title>GitHub Callback</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -17,32 +16,134 @@
       margin-top: 1em;
       font-size: 1.2em;
     }
+    .log {
+      background-color: #f9f9f9;
+      border: 1px solid #ccc;
+      padding: 1em;
+      margin-top: 1em;
+      font-size: 1.1em;
+      color: #333;
+    }
+    .error {
+      background-color: #f8d7da;
+      color: #721c24;
+      border: 1px solid #f5c6cb;
+      padding: 1em;
+      margin-top: 1em;
+    }
   </style>
 </head>
 <body>
-  <h2>Accesso con Google completato!</h2>
-  <p>Il tuo token è stato copiato automaticamente negli appunti. Torna nell'app per completare il login.</p>
-  <code id="tokenDisplay">Caricamento token...</code>
+  <h2>Login effettuato con GitHub!</h2>
+  <p>Il codice di autorizzazione è stato copiato automaticamente negli appunti. Torna nell'app per completare il login.</p>
+  <code id="codeDisplay">Caricamento codice...</code>
+
+  <div id="logContainer" class="log"></div>
+  <div id="errorContainer" class="error" style="display:none;"></div>
+  <div id="emailContainer"></div> <!-- Aggiungi un div per visualizzare l'email -->
 
   <script>
-    function extractTokenFromUrl() {
-      const params = new URLSearchParams(window.location.hash.substring(1) || window.location.search.substring(1));
-      return params.get('access_token') || params.get('id_token');
-    }
+  const urlParams = new URLSearchParams(window.location.search);
+  const code = urlParams.get('code');
 
-    const token = extractTokenFromUrl();
+  function logMessage(message) {
+    const logContainer = document.getElementById('logContainer');
+    logContainer.innerHTML += `<p>${message}</p>`;
+  }
 
-    if (token) {
-      document.getElementById('tokenDisplay').innerText = token;
+  function showError(message) {
+    const errorContainer = document.getElementById('errorContainer');
+    errorContainer.style.display = 'block';
+    errorContainer.innerHTML = `<p>${message}</p>`;
+  }
 
-      navigator.clipboard.writeText(token).then(() => {
-        console.log("Token copiato negli appunti.");
-      }).catch(err => {
-        console.error("Errore durante la copia:", err);
-      });
-    } else {
-      document.body.innerText = "Accesso annullato o fallito.";
-    }
+  if (code) {
+    document.getElementById('codeDisplay').innerText = code;
+
+    navigator.clipboard.writeText(code).then(() => {
+      logMessage("Codice copiato negli appunti.");
+    }).catch(err => {
+      showError("Errore durante la copia negli appunti.");
+    });
+
+    // Chiamiamo la funzione solo ora che è definita correttamente
+    exchangeCodeForAccessToken(code);
+
+  } else {
+    showError("Accesso fallito. Il login non è riuscito o è stato annullato.");
+  }
+
+  // Funzione che invia il codice di autorizzazione al backend e gestisce la risposta
+  function exchangeCodeForAccessToken(code) {
+    fetch('https://5qfi09ze47.execute-api.eu-west-1.amazonaws.com/startGitHub', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ code })
+    })
+    .then(response => {
+      logMessage(`Risposta dal server: ${response.status}`);
+      if (!response.ok) {
+        throw new Error(`Errore di rete: ${response.statusText}`);
+      }
+      return response.json();
+    })
+    .then(data => {
+      if (data.access_token) {
+        logMessage('Access Token ottenuto: ' + data.access_token);
+        localStorage.setItem('access_token', data.access_token);
+
+        // Recupera l'email dell'utente
+        fetchUserEmail(data.access_token);
+
+        document.body.innerHTML = `
+          <h2>Benvenuto!</h2>
+          <p>L'accesso è stato completato con successo.</p>
+          <p>Token di accesso ricevuto e memorizzato localmente.</p>
+        `;
+      } else {
+        logMessage("Nessun access token ricevuto.");
+        if (data.error === 'expired_code') {
+          showError("Il codice di autorizzazione è scaduto. Per favore ripeti il login.");
+        } else if (data.error === 'used_code') {
+          showError("Il codice di autorizzazione è già stato utilizzato. Per favore ripeti il login.");
+        } else {
+          showError("Si è verificato un errore sconosciuto durante l'autenticazione.");
+        }
+      }
+    })
+    .catch(error => {
+      logMessage('Errore nella richiesta al backend Lambda: ' + error.message);
+      showError("Si è verificato un errore durante il processo di autenticazione.");
+    });
+  }
+
+  // Funzione per ottenere l'email dell'utente
+  function fetchUserEmail(accessToken) {
+    fetch('https://api.github.com/user/emails', {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${accessToken}`
+      }
+    })
+    .then(response => response.json())
+    .then(emails => {
+      // Cerca l'email principale dell'utente (prima nell'elenco)
+      const primaryEmail = emails.find(email => email.primary).email;
+      logMessage('Email principale dell\'utente: ' + primaryEmail);
+
+      // Visualizza l'email a schermo
+      const emailContainer = document.getElementById('emailContainer');
+      emailContainer.innerHTML = `<p><strong>Email principale:</strong> ${primaryEmail}</p>`;
+
+      // Memorizza l'email nel localStorage
+      localStorage.setItem('user_email', primaryEmail);
+    })
+    .catch(error => {
+      logMessage('Errore nel recupero dell\'email: ' + error.message);
+    });
+  }
   </script>
 </body>
 </html>
